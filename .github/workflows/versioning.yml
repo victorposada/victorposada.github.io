@@ -1,0 +1,80 @@
+name: Semantic Release in Bash
+
+on:
+  push:
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Semantic Release in Bash
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Get current version
+        id: current_version
+        run: |
+          if [ -f VERSION ]; then
+            cat VERSION
+          else
+            echo "0.0.0" > VERSION
+          fi
+          echo "version=$(cat VERSION)" >> $GITHUB_ENV
+
+      - name: Determine new version
+        id: determine_version
+        run: |
+          # Parse commit messages to determine the version bump
+          if git log -1 --pretty=%B | grep -q "^feat:"; then
+            bump="minor"
+          elif git log -1 --pretty=%B | grep -q "^fix:"; then
+            bump="patch"
+          else
+            bump="none"
+          fi
+
+          current_version=$(cat VERSION)
+          IFS='.' read -r major minor patch <<< "$current_version"
+
+          if [ "$bump" == "minor" ]; then
+            minor=$((minor + 1))
+            patch=0
+          elif [ "$bump" == "patch" ]; then
+            patch=$((patch + 1))
+          fi
+
+          new_version="$major.$minor.$patch"
+          echo "$new_version" > VERSION
+
+          echo "new_version=$new_version" >> $GITHUB_ENV
+
+      - name: Commit and push new version
+        if: steps.determine_version.outputs.new_version != ${{ env.version }}
+        run: |
+          git add VERSION
+          git commit -m "chore(release): version ${{ env.new_version }}"
+          git tag v${{ env.new_version }}
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        with:
+          tag_name: v${{ env.new_version }}
+          release_name: Release ${{ env.new_version }}
+          body: |
+            Changes in this release:
+            $(git log --oneline $(git describe --tags --abbrev=0)..HEAD)
+          draft: false
+          prerelease: false
